@@ -118,31 +118,11 @@ char* mysql_status(dictionary *conf, FILE *log)
 }
 
 /* 	Main Routine				*/
-int main_construct(FILE *log)
+int main_construct(FILE *log, dictionary *conf, int listenfd)
 {
-	dictionary *conf = load_conf();
-
-	//Setup socket related structures
-	int listenfd = 0, connfd = 0;
+	int connfd = 0;
 	struct sockaddr_in serv_addr;
-
 	char sendBuff[1025];
-	int port = atoi(get_config(conf, "hawk:port"));
-	int backlog = atoi(get_config(conf, "hawk:total_clients"));
-
-	//Configure socket	
-	listenfd = socket(AF_INET, SOCK_STREAM, 0);
-	memset(&serv_addr, '0', sizeof(serv_addr));
-	memset(sendBuff, '0', sizeof(sendBuff)); 
-	
-	serv_addr.sin_family = AF_INET;
-	serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-	serv_addr.sin_port = htons(port);
-
-	
-	//Bind to socket
-	bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr));
-	listen(listenfd, (backlog + 1));
 
 	//Start main loop
 	while(1)
@@ -193,7 +173,8 @@ int main(void)
 	log = fopen("./log/hawkd.log", "a");
 	if(errno || (NULL == log))
 	{
-		perror("ERROR: Failed to open main log file");
+		printf("%s", "Failed to open main log file. Exiting...");
+		fflush(stdout);
      		exit(1);
 	}
 
@@ -210,7 +191,46 @@ int main(void)
                 /* Log any failures here */
                 exit(EXIT_FAILURE);
         }
+
+        dictionary *conf = load_conf();
+        errno = 0;
+
+        //Setup socket related structures
+        int listenfd = 0;
+        struct sockaddr_in serv_addr;
+
+        char sendBuff[1025];
+        int port = atoi(get_config(conf, "hawk:port"));
+        int backlog = atoi(get_config(conf, "hawk:total_clients"));
+
+        //Configure socket      
+        listenfd = socket(AF_INET, SOCK_STREAM, 0);
+
+        if (listenfd < 0)
+        {
+        	printf("%s", log_entry(4, "\n\n", "Could not initiate socket: ", strerror(errno), "\n\n"));
+		fflush(stdout);
+		exit(1);
+        }
         
+	memset(&serv_addr, '0', sizeof(serv_addr));
+        memset(sendBuff, '0', sizeof(sendBuff));
+
+        serv_addr.sin_family = AF_INET;
+        serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        serv_addr.sin_port = htons(port);
+
+        //Bind to socket
+
+        if (bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0)
+        {
+                printf("%s", log_entry(4, "\n\n", "Could not bind to socket: ", strerror(errno), "\n\n"));
+		fflush(stdout);
+                exit(1);
+        }
+
+        listen(listenfd, (backlog + 1));  
+      
         //Close out the standard file descriptors
         close(STDIN_FILENO);
         close(STDOUT_FILENO);
@@ -219,13 +239,12 @@ int main(void)
         
         //Begin main routine
 	put_log(log, "Starting HAwk...");
-        main_construct(log);	
+        main_construct(log, conf, listenfd);	
 }
 
 
 /*
  * Fix WS_REP query
- * Enable logging on failure
  * Signal Handling
  * Close socket and log on signal
  */
