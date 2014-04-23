@@ -20,10 +20,74 @@
 /*	Globals					*/
 int sig_flag = 0;
 
-/* 	Parse Configuration File		*/
-dictionary* load_conf(void) 
+/* 	Get Execution Directory			*/
+char* get_execdir(void)
 {
-        dictionary *file = iniparser_load("./conf/hawkd.ini");
+        char * path = getenv("HAWK_HOME");
+        if (path == NULL || strlen(path) == 0)
+        {
+                path = ".";
+                return path;
+        }
+        else
+        {
+                return path;
+        }
+}
+
+/*	Basic Functions				*/
+char* concat_str(char *first, ...)
+{
+        va_list magazine;
+        size_t length = 0x0;
+        char *rBuff = NULL;
+        char *tBuff = NULL;
+        char *temp = NULL;
+
+
+        if (!first)
+        {
+                return NULL;
+        }
+
+        va_start(magazine, first);
+        length = strlen(first) + 1;
+
+        rBuff = calloc(0x1, length);
+        strncpy(rBuff, first, strlen(first));
+
+        if(!rBuff)
+        {
+                return NULL;
+        }
+
+        while ((tBuff = va_arg(magazine, char *)) != NULL)
+        {
+
+                length += strlen(tBuff);
+                temp = realloc(rBuff, length);
+                if (temp)
+                {
+                        rBuff = temp;
+                }
+                else
+                {
+                        return NULL;
+                }
+
+                strncat(rBuff, tBuff, strlen(tBuff));
+        }
+
+        va_end(magazine);
+        return rBuff;
+}
+
+/* 	Parse Configuration File		*/
+dictionary* load_conf(void)
+{
+	char *path = concat_str(get_execdir(), "/conf/hawkd.ini", NULL);
+        dictionary *file = iniparser_load(path);
+	free(path);
 	return file;
 }
 
@@ -51,23 +115,21 @@ void signal_handler(int sig)
 }
 
 /*	User Lookup				*/
-uid_t* getid_byName(char *name)
+uid_t getid_byName(char *name)
 {
         struct passwd result, *resBuff;
-        char buff[512];
-        if (-1 < getpwnam_r(name, &result, buff, 512, &resBuff))
+        char buff[512] = "";
+	if (-1 < getpwnam_r(name, &result, buff, 512, &resBuff))
         {
-                uid_t *array = malloc(sizeof(uid_t) * 2);
-                array[0] = resBuff->pw_uid;
-                array[1] = resBuff->pw_gid;
-                return array;
+                uid_t result;
+                result = resBuff->pw_uid;
+                return result;
         }
         else
         {
-                uid_t *array = malloc(sizeof(int) * 2);
-                array[0] = 0;
-                array[1] = 1;
-                return array;
+                uid_t result;
+                result = 0;
+                return result;
         }
 }
 
@@ -77,6 +139,7 @@ FILE* open_logs(void)
         FILE *log;
         errno = 0;
 
+	char *path = concat_str(get_execdir(), "/log/hawkd.log", NULL);
         log = fopen("./log/hawkd.log", "a");
         if(errno || (NULL == log))
         {
@@ -84,28 +147,8 @@ FILE* open_logs(void)
                 fflush(stdout);
                 exit(1);
         }
+	free(path);
 	return log;
-}
-
-char* log_entry(int n_args, ...)
-{
-        va_list magazine;
-        va_start(magazine, n_args);
-
-        char *message = malloc(sizeof(magazine));
-
-        for (int i=0; i < n_args; i++)
-        {
-                if (i == 0)
-                {
-                        strcpy(message, va_arg(magazine, char *));
-                }
-                else
-                {
-                        strcat(message, va_arg(magazine, char *));
-                }
-        }
-        return message;
 }
 
 void put_log(FILE *log_file, char *message)
@@ -126,10 +169,12 @@ void put_log(FILE *log_file, char *message)
 /*	Initialize Socket		*/
 int socket_init(dictionary *conf)
 {
+	char *entry = NULL;
+
         //Setup socket related structures
         int listenfd = 0;
         struct sockaddr_in serv_addr;
-        int flags;
+        int flags = 0;
 
         char sendBuff[1025];
         int port = atoi(get_config(conf, "hawk:port"));
@@ -157,7 +202,9 @@ int socket_init(dictionary *conf)
 
         if (listenfd < 0)
         {
-                printf("%s", log_entry(4, "\n\n", "FATAL - Could not initiate socket: ", strerror(errno), "\n\n"));
+		entry = concat_str("\n\n", "FATAL - Could not initiate socket: ", strerror(errno), "\n\n", NULL);
+                printf("%s", entry);
+		free(entry);
                 fflush(stdout);
                 exit(1);
         }
@@ -173,7 +220,9 @@ int socket_init(dictionary *conf)
 
         if (bind(listenfd, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0)
         {
-                printf("%s", log_entry(4, "\n\n", "FATAL - Could not bind to socket: ", strerror(errno), "\n\n"));
+		entry = concat_str("\n\n", "FATAL - Could not bind to socket: ", strerror(errno), "\n\n", NULL);
+                printf("%s", entry);
+		free(entry);
                 fflush(stdout);
                 exit(1);
         }
@@ -188,40 +237,48 @@ char* mysql_status(dictionary *conf, FILE *log)
 {
 	MYSQL *curs = mysql_init(NULL);
 	MYSQL_ROW row;	
+	char *entry = NULL;
 
-	if (curs == NULL)
+	if (!curs)
 	{
-		put_log(log, "ERROR - Could not create MySQL cursor: ");
+		entry = concat_str("ERROR - Could not create MySQL cursor: ", mysql_error(curs), NULL);
+		put_log(log, entry);
+		free(entry);
 		return("0");
 	}
 
-	if (mysql_real_connect(curs, get_config(conf, "mysql:host"), get_config(conf, "mysql:user"), get_config(conf, "mysql:pass"), "status", 0, NULL, 0) == NULL)
+	if (mysql_real_connect(curs, get_config(conf, "mysql:host"), get_config(conf, "mysql:user"), get_config(conf, "mysql:pass"), "mysql", 0, NULL, 0) == NULL)
 	{
-                put_log(log, "ERROR - Could not connect to MySQL server");
+		entry = concat_str("ERROR - Could not connect to MySQL server: ", mysql_error(curs), NULL);
+                put_log(log, entry);
+		free(entry);
 		mysql_close(curs);
 		return("0");
 	}
 	
-	if (mysql_query(curs, "SELECT * FROM ws_rep"))
+	if (mysql_query(curs, "SHOW STATUS LIKE 'wsrep_local_state'"))
 	{
-                put_log(log, "ERROR - Could not execute query on ws_rep status");
+		entry = concat_str("ERROR - Could not execute query on ws_rep status: ", mysql_error(curs), NULL);
+                put_log(log, entry);
+		free(entry);
 		mysql_close(curs);
       		return("0");
   	}
 
 	MYSQL_RES *result = mysql_store_result(curs);
 	
-	if (result == NULL)
+	if (!result)
 	{
-                put_log(log, "ERROR - Could not store MySQL result");
-		mysql_free_result(result);
+		entry = concat_str("ERROR - Could not store MySQL result: ", mysql_error(curs), NULL);
+                put_log(log, entry);
+		free(entry);
 		mysql_close(curs);
 		return("0");
 	}
 	
 	int num_fields = mysql_num_fields(result);
 
-	char *ws_rep_status;
+	char *ws_rep_status = NULL;
 
 	while ((row = mysql_fetch_row(result)))
 	{
@@ -241,8 +298,7 @@ int main_construct(FILE *log, dictionary *conf, int listenfd)
 {
         int connfd = 0;
         struct sockaddr_in serv_addr;
-        char sendBuff[1025];
-        int readBuff_size = 0;
+        char sendBuff[140];
 
         //Start main loop
         while(1)
@@ -251,30 +307,27 @@ int main_construct(FILE *log, dictionary *conf, int listenfd)
                 //If data is recieved - run mysql_status and write result to socket
                 connfd = accept(listenfd, (struct sockaddr*)NULL, NULL);
 
-                if (connfd > readBuff_size)
+                if (connfd != -1)
                 {
-                        char *message;
+                        char *message = "HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain\r\nConnection: close\r\nContent-Length: 44\r\n\r\nMariaDB Cluster Node is not synced.\r\n";
                         char *status = mysql_status(conf, log);
 
                         if (strncmp("4", status, 1024) == 0)
                         {
                                 message = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nConnection: close\r\nContent-Length: 40\r\n\r\nMariaDB Cluster Node is synced.\r\n";
                         }
-                        else
-                        {
-                                message = "HTTP/1.1 503 Service Unavailable\r\nContent-Type: text/plain\r\nConnection: close\r\nContent-Length: 44\r\n\r\nMariaDB Cluster Node is not synced.\r\n";
-                        }
                         snprintf(sendBuff, sizeof(sendBuff), "%s\r\n", message);
                         write(connfd, sendBuff, strlen(sendBuff));
                 }
-                readBuff_size = connfd;
 
 		//Signal Actions
 		if (sig_flag == 4)
 		{
 			put_log(log, "INFO - Shutting down HAwk...");
         		put_log(log, "INFO - Releasing Socket");
-        		close(connfd);
+        		close(listenfd);
+			//Freeing configuration dictionary
+			iniparser_freedict(conf);
         		put_log(log, "INFO - Closing Log Files");
 			fflush(log);
 			fclose(log);
@@ -287,7 +340,8 @@ int main_construct(FILE *log, dictionary *conf, int listenfd)
 			fclose(log);
 			log = open_logs();
 			put_log(log, "INFO - Successfully reloaded logs");
-			free(conf);
+			//free(conf);
+			iniparser_freedict(conf);
 			conf = load_conf();
 			sig_flag = 0;	
 		}
@@ -321,10 +375,10 @@ int main(void)
 	FILE *log = open_logs();
 
 	//Query for UID/GID
-	uid_t *id = getid_byName(get_config(conf, "hawk:daemon_user"));
+	uid_t id = getid_byName(get_config(conf, "hawk:daemon_user"));
 
 	//Set UID
-	if (setuid(id[0]) != 0)
+	if (setuid(id) != 0)
 	{
 		put_log(log, "FATAL - Could not set UID for daemon");
 		exit(1);
@@ -356,9 +410,3 @@ int main(void)
         main_construct(log, conf, listenfd);	
 	return 0;
 }
-
-
-/*
- * Fix WS_REP query
- * Recycle socket buffer at certain size?
- * */
