@@ -350,6 +350,7 @@ int main_construct(FILE *log, dictionary *conf, int listenfd)
         		put_log(log, "INFO - Closing Log Files");
 			fflush(log);
 			fclose(log);
+			close(connfd);
 			break;
 		}
 		if (sig_flag == 6)
@@ -357,6 +358,7 @@ int main_construct(FILE *log, dictionary *conf, int listenfd)
 			put_log(log, "INFO - Received HUP. Reloading...");
 			fflush(log);
 			fclose(log);
+			close(connfd);
 			log = open_logs();
 			put_log(log, "INFO - Successfully reloaded logs");
 			//free(conf);
@@ -364,7 +366,7 @@ int main_construct(FILE *log, dictionary *conf, int listenfd)
 			conf = load_conf();
 			sig_flag = 0;	
 		}
-
+		close(connfd);
                 sleep(1);
         }
 	return 0;
