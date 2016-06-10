@@ -411,6 +411,15 @@ int main(void)
                 put_log(log, "FATAL - Session ID was not set properly");
                 exit(EXIT_FAILURE);
         }
+
+	//Write PID file
+	if(strcmp(get_config(conf, "hawk:pid_path"),"") > 0)
+	{
+		FILE *pidfile;
+		pidfile = fopen(get_config(conf, "hawk:pid_path"), "w");
+		fprintf(pidfile, "%d", getpid());
+		fflush(pidfile);
+	}
         
 	//Initialize Socket
 	int listenfd = socket_init(conf);
